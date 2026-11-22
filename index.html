@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="用 10×10 到 50×50 个三阶魔方拼出像素雪花，对比效果并查看每个魔方的转法。">
+  <title>魔方拼雪花</title>
+<style>
+  #cube-snowflake-comparison {
+    --cs-white: light-dark(#fffef9, #f8fcff);
+    --cs-blue: light-dark(#155ab5, #174d9e);
+    --cs-highlight: light-dark(#ffd55c, #ffe28b);
+    --cs-seam: light-dark(#062247, #06142b);
+    display: grid;
+    gap: calc(var(--font-size-base) * 1.15);
+  }
+  #cube-snowflake-comparison .cs-comparison {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: calc(var(--font-size-base) * .8);
+  }
+  #cube-snowflake-comparison figure {
+    margin: 0;
+    min-width: 0;
+    display: grid;
+    gap: calc(var(--font-size-base) * .4);
+    align-content: start;
+  }
+  #cube-snowflake-comparison canvas {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    image-rendering: pixelated;
+  }
+  #cube-snowflake-comparison .cs-caption {
+    display: grid;
+    gap: calc(var(--font-size-base) * .15);
+  }
+  #cube-snowflake-comparison .cs-caption > :first-child {
+    font-weight: 500;
+  }
+  #cube-snowflake-comparison .cs-build,
+  #cube-snowflake-comparison .cs-inspect {
+    display: grid;
+    gap: calc(var(--font-size-base) * .65);
+    align-content: start;
+    min-width: 0;
+  }
+  #cube-snowflake-comparison .cs-workbench {
+    display: grid;
+    grid-template-columns: minmax(0, 30em) minmax(0, 18em);
+    align-items: start;
+    gap: calc(var(--font-size-base) * 1.25);
+  }
+  #cube-snowflake-comparison .cs-coordinates > label {
+    flex: 1 1 6em;
+    min-width: 0;
+  }
+  #cube-snowflake-comparison .cs-face {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    max-width: 9em;
+    aspect-ratio: 1;
+    background: var(--cs-seam);
+    gap: 2px;
+    padding: 2px;
+  }
+  #cube-snowflake-comparison .cs-sticker {
+    display: grid;
+    place-items: center;
+    background: var(--cs-blue);
+    color: var(--cs-white);
+  }
+  #cube-snowflake-comparison .cs-sticker.is-white {
+    background: var(--cs-white);
+    color: var(--cs-seam);
+  }
+  #cube-snowflake-comparison .cs-recipe {
+    display: grid;
+    gap: calc(var(--font-size-base) * .25);
+  }
+  #cube-snowflake-comparison .cs-notation {
+    color: var(--muted-foreground);
+  }
+  @media (max-width: 680px) {
+    #cube-snowflake-comparison .cs-comparison {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    #cube-snowflake-comparison .cs-workbench {
+      grid-template-columns: minmax(0, 30em);
+    }
+  }
+</style>
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+<main class="site-frame">
+  <header class="site-intro">
+    <h1>魔方拼雪花</h1>
+    <p>用 100 到 2,500 个魔方拼同一朵雪花，每个魔方贡献 3×3 个像素。</p>
+  </header>
+<section id="cube-snowflake-comparison" aria-labelledby="cs-title">
+  <h2 id="cs-title">同一朵六角雪花的五种拼法</h2>
+  <div class="cs-comparison"></div>
+  <div class="cs-build">
+    <h2>放大拼装图</h2>
+    <div class="viz-controls">
+      <label class="form-label cs-size-label">选择魔方阵列尺寸
+        <select class="form-select" id="cs-size" aria-label="魔方阵列"></select>
+      </label>
+      <label class="form-check">
+        <input type="checkbox" class="form-check-input" id="cs-grid" checked> 标出魔方分界
+      </label>
+    </div>
+    <p class="cs-board-help text-small">点击或轻触图中的魔方，查看正面九格和转法。</p>
+    <div class="cs-workbench">
+      <canvas id="cs-board" class="cs-board cursor-interaction" role="img" aria-label="放大后的雪花拼装图"></canvas>
+      <div class="cs-inspect">
+        <h3>查看单个魔方</h3>
+        <div class="viz-controls cs-coordinates">
+          <label class="form-label">行（自上而下）
+            <input type="number" class="form-control" id="cs-row" min="1" step="1" inputmode="numeric">
+          </label>
+          <label class="form-label">列（自左至右）
+            <input type="number" class="form-control" id="cs-column" min="1" step="1" inputmode="numeric">
+          </label>
+        </div>
+        <div id="cs-face" class="cs-face" role="img"></div>
+        <div id="cs-recipe" class="cs-recipe" aria-live="polite"></div>
+        <div class="text-small cs-notation">F 前，B 后，U 上，D 下，L 左，R 右。面向该面时，字母表示顺时针转 90°，′ 表示逆时针，2 表示转 180°。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(() => {
+  const root = document.getElementById('cube-snowflake-comparison');
+  const sizes = [10, 20, 30, 40, 50];
+  const impressions = ['轮廓鲜明', '主枝与侧枝分开', '中心孔与细枝清晰', '细枝边缘更整齐', '尖端最细，阶梯感最弱'];
+  const recipes = /* generated-move-table */ {
+    "100000000": "U B U'",
+    "100000001": "U F' U' F U",
+    "100000011": "B L F' L'",
+    "100000110": "L B2 L' R' F",
+    "100000111": "R' F2 R F'",
+    "100001011": "F U2 B R' D' L2 U'",
+    "100001111": "F' B L U' F2 U",
+    "100100000": "U' F' L",
+    "100100010": "F U R' F2 B2 D'",
+    "100100100": "L",
+    "100100101": "L F2 L' F2",
+    "100100110": "F2 B D' L' D",
+    "100100111": "F' L D",
+    "100101111": "F L B2 R' D'",
+    "101000000": "L U2 L' U2",
+    "101001001": "L F2 L'",
+    "101001011": "F' R' D2 L D L2",
+    "101100100": "R' F2 R",
+    "101100110": "F L D2 R' D' R2",
+    "101101000": "L D2 R' D2",
+    "101101111": "F L R' D'",
+    "110000000": "B L F U'",
+    "110000001": "B L F' L' F2",
+    "110000100": "L F D2 R D2",
+    "110000111": "R' B2 L F",
+    "110100000": "F2 D R F' L R'",
+    "110100001": "R' D2 F' L D2 R",
+    "110100100": "B U L U'",
+    "110100101": "B' L R' B' U R",
+    "110100110": "R F' B L U' D",
+    "110100111": "F' R' B2 L D F",
+    "111000000": "L F",
+    "111000001": "R' F2 R F",
+    "111000011": "R' B2 L F'",
+    "111000100": "L F2 L' F'",
+    "111000110": "L B2 R' F",
+    "111001000": "F R U R'",
+    "111001001": "B' R' U",
+    "111001011": "U2 L F R' D'",
+    "111001100": "F' B L D F2 D'",
+    "111001111": "F B' R' U D'",
+    "111100000": "F' L' U' L",
+    "111100001": "F B' R' D' F2 D",
+    "111100100": "B L U'",
+    "111100110": "U2 R' F' L D",
+    "111100111": "F L R' D' F",
+    "111101000": "B L U' D2 R' D2",
+    "111101001": "U2 B' R' U L",
+    "111101100": "U2 B L U' R'",
+    "111101101": "B L R' U'",
+    "000000000": "",
+    "000000001": "D B' D'",
+    "000000010": "B L' F' B D",
+    "000000011": "B L' D L",
+    "000000100": "D' B D",
+    "000000101": "B2 L' D2 L D2",
+    "000000110": "B L' F' D",
+    "000000111": "L F'",
+    "000001000": "U F B' R'",
+    "000001001": "U R' U'",
+    "000001010": "F R D' B2 R2 D' R",
+    "000001011": "F' U F U' R' D'",
+    "000001111": "F B2 R' D' R",
+    "000100000": "U' F' B L",
+    "000100010": "F U' F' U D' L D",
+    "000100100": "U' L U",
+    "000100110": "F U' F' U L D",
+    "000100111": "F R U R' F2",
+    "000101101": "U R' U' B2 L",
+    "000101111": "D B L' R' D L2",
+    "001000000": "U' B' U",
+    "001000011": "L F2 L' R' F",
+    "001000100": "U' F U F' U'",
+    "001000110": "B' R' F R",
+    "001000111": "L F2 L' F",
+    "001001000": "U F R'",
+    "001001001": "R'",
+    "001001010": "F D R' D2 B2 D",
+    "001001011": "F L' R' D' L",
+    "001001101": "R' F2 R F2",
+    "001001111": "F R' D'",
+    "001100110": "F B' R' U F2 R U'",
+    "001100111": "F B' R' U F2 U'",
+    "001101111": "F' R' B2 L D",
+    "010000000": "B L F B' U'",
+    "010001000": "B U R' B2 U2 R' U",
+    "010001001": "B' U' R' B U",
+    "010100000": "B D' F L R' U' R",
+    "010100100": "B U L B' U'",
+    "011000000": "B L U' L'",
+    "011000001": "L B2 L' R' F'",
+    "011000100": "B L B U' L'",
+    "011000111": "L B2 R' F'",
+    "011001000": "F D2 R F' U R'",
+    "011001001": "B' U' R' U",
+    "011001011": "L F L R' D' L2",
+    "011001100": "L D2 F R' D2 L'",
+    "011001101": "B L B R' U' L'",
+    "011001111": "F L B2 R' D' F'"
+  };
+  const axisVectors = Array.from({ length: 6 }, (_, index) => {
+    const angle = index * Math.PI / 3;
+    return [Math.sin(angle), -Math.cos(angle)];
+  });
+  // Coordinates along and across an arm, with width specified at both endpoints.
+  const segments = [
+    [.177, 0, .892, 0, .043, .017],
+    [.273, 0, .415, .103, .031, .019],
+    [.421, 0, .623, .169, .036, .017],
+    [.526, .089, .661, .091, .021, .012],
+    [.617, 0, .764, .122, .029, .015],
+    [.763, 0, .849, .069, .022, .012],
+  ].map(([x, y, endX, endY, w1, w2]) => ({
+    x, y, dx: endX - x, dy: endY - y,
+    lengthSquared: (endX - x) ** 2 + (endY - y) ** 2,
+    w1, w2
+  }));
+  function inCrystal(x, y) {
+    const hexDistance = Math.max(Math.abs(x),
+      Math.abs(.5 * x + .8660254037844386 * y),
+      Math.abs(.5 * x - .8660254037844386 * y));
+    if (hexDistance <= .043 || (hexDistance >= .115 && hexDistance <= .212)) return true;
+    for (const [ux, uy] of axisVectors) {
+      const along = x * ux + y * uy;
+      if (along < .13 || along > .92) continue;
+      const across = Math.abs(x * uy - y * ux);
+      if (across > .20) continue;
+      for (const line of segments) {
+        const dx = along - line.x;
+        const dy = across - line.y;
+        const t = Math.max(0, Math.min(1, (dx * line.dx + dy * line.dy) / line.lengthSquared));
+        const width = line.w1 + t * (line.w2 - line.w1);
+        if ((dx - t * line.dx) ** 2 + (dy - t * line.dy) ** 2 <= width ** 2) return true;
+      }
+    }
+    return false;
+  }
+  function makeMosaic(cubes) {
+    const width = cubes * 3;
+    const cells = new Uint8Array(width * width);
+    const samples = [.1, .3, .5, .7, .9];
+    // Exact mirror symmetry in both axes of the square sticker grid.
+    for (let row = 0; row < width / 2; row++) {
+      for (let column = 0; column < width / 2; column++) {
+        let covered = 0;
+        for (const dy of samples) for (const dx of samples) {
+          if (inCrystal(2 * (column + dx) / width - 1, 2 * (row + dy) / width - 1)) covered++;
+        }
+        const color = Number(covered >= 11);
+        cells[row * width + column] = color;
+        cells[row * width + width - 1 - column] = color;
+        cells[(width - 1 - row) * width + column] = color;
+        cells[(width - 1 - row) * width + width - 1 - column] = color;
+      }
+    }
+    return { cubes, width, cells };
+  }
+  function cubeFace(mosaic, row, column) {
+    const { width, cells } = mosaic;
+    return Array.from({ length: 9 }, (_, index) =>
+      cells[(3 * row + Math.floor(index / 3)) * width + 3 * column + index % 3]);
+  }
+  /* end-model */
+  const mosaics = sizes.map(makeMosaic);
+  const comparison = root.querySelector('.cs-comparison');
+  const size = root.querySelector('#cs-size');
+  const board = root.querySelector('#cs-board');
+  const rowField = root.querySelector('#cs-row');
+  const columnField = root.querySelector('#cs-column');
+  const face = root.querySelector('#cs-face');
+  const recipe = root.querySelector('#cs-recipe');
+  const showGrid = root.querySelector('#cs-grid');
+  const nf = new Intl.NumberFormat('zh-CN');
+  let currentIndex = 2;
+  let selected = [14, 14];
+
+  function draw(canvas, mosaic, isDetail = false) {
+    const { cubes, width, cells } = mosaic;
+    const unit = isDetail ? 12 : 1;
+    const side = unit * width;
+    canvas.width = side;
+    canvas.height = side;
+    const context = canvas.getContext('2d');
+    const colors = getComputedStyle(root);
+    const cssColor = name => {
+      const probe = document.createElement('span');
+      probe.hidden = true;
+      probe.style.color = colors.getPropertyValue(name);
+      root.append(probe);
+      const value = getComputedStyle(probe).color;
+      probe.remove();
+      return value;
+    };
+    context.fillStyle = cssColor('--cs-blue');
+    context.fillRect(0, 0, side, side);
+    context.fillStyle = cssColor('--cs-white');
+    for (let index = 0; index < cells.length; index++) {
+      if (cells[index]) context.fillRect((index % width) * unit, Math.floor(index / width) * unit, unit, unit);
+    }
+    if (!isDetail || !showGrid.checked) return;
+    const pitch = 3 * unit;
+    context.fillStyle = cssColor('--cs-seam');
+    context.globalAlpha = .64;
+    const thickness = Math.max(1, Math.round(side / 470));
+    for (let i = 1; i < cubes; i++) {
+      context.fillRect(i * pitch - thickness / 2, 0, thickness, side);
+      context.fillRect(0, i * pitch - thickness / 2, side, thickness);
+    }
+    context.globalAlpha = 1;
+    context.strokeStyle = cssColor('--cs-seam');
+    context.lineWidth = thickness * 3 + 2;
+    const [row, column] = selected;
+    const inset = thickness + 1;
+    const rect = [column * pitch + inset, row * pitch + inset, pitch - 2 * inset, pitch - 2 * inset];
+    context.strokeRect(...rect);
+    context.strokeStyle = cssColor('--cs-highlight');
+    context.lineWidth = thickness * 2;
+    context.strokeRect(...rect);
+  }
+  function paintInspection() {
+    const mosaic = mosaics[currentIndex];
+    const [row, column] = selected;
+    const stickers = cubeFace(mosaic, row, column);
+    const whiteCenter = stickers[4] === 1;
+    const main = whiteCenter ? '白' : '蓝';
+    const accent = whiteCenter ? '蓝' : '白';
+    const key = stickers.map(value => Number(value !== stickers[4])).join('');
+    const moves = recipes[key];
+    face.replaceChildren(...stickers.map(value => {
+      const tile = document.createElement('span');
+      tile.className = value ? 'cs-sticker is-white' : 'cs-sticker';
+      tile.textContent = value ? '白' : '蓝';
+      tile.setAttribute('aria-hidden', 'true');
+      return tile;
+    }));
+    const colors = stickers.map(value => value ? '白' : '蓝');
+    face.setAttribute('aria-label', `第 ${row + 1} 行第 ${column + 1} 列的正面。${[0, 3, 6].map(i => colors.slice(i, i + 3).join('、')).join('；')}`);
+    const setup = document.createElement('div');
+    setup.textContent = `从复原状态开始，${main}面朝前、${accent}面朝上`;
+    const turns = document.createElement('div');
+    turns.textContent = moves === '' ? '保持复原状态' : `转法 ${moves.replaceAll("'", '′')}`;
+    recipe.replaceChildren(setup, turns);
+    board.setAttribute('aria-label', `${mosaic.cubes}×${mosaic.cubes} 魔方拼装图，选中第 ${row + 1} 行第 ${column + 1} 列`);
+    draw(board, mosaic, true);
+  }
+  function setSelection(row, column) {
+    const limit = mosaics[currentIndex].cubes;
+    const clamp = value => Math.max(0, Math.min(limit - 1, Math.round(value)));
+    selected = [clamp(row), clamp(column)];
+    rowField.value = selected[0] + 1;
+    columnField.value = selected[1] + 1;
+    rowField.max = limit;
+    columnField.max = limit;
+    paintInspection();
+  }
+  const previews = mosaics.map((mosaic, index) => {
+    const { cubes, width } = mosaic;
+    const option = document.createElement('option');
+    option.value = index;
+    option.textContent = `${cubes}×${cubes} · ${nf.format(cubes ** 2)} 个魔方`;
+    size.append(option);
+    const figure = document.createElement('figure');
+    const canvas = document.createElement('canvas');
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', `${cubes}×${cubes} 魔方拼成的像素雪花`);
+    const caption = document.createElement('figcaption');
+    caption.className = 'cs-caption';
+    const dimension = document.createElement('span');
+    dimension.textContent = `${cubes}×${cubes} 魔方`;
+    const count = document.createElement('span');
+    count.className = 'text-small text-muted';
+    count.textContent = `${nf.format(cubes ** 2)} 个 · ${width}×${width} 格`;
+    const impression = document.createElement('span');
+    impression.className = 'text-small';
+    impression.textContent = impressions[index];
+    caption.append(dimension, count, impression);
+    figure.append(canvas, caption);
+    comparison.append(figure);
+    draw(canvas, mosaic);
+    return canvas;
+  });
+  size.value = currentIndex;
+  size.addEventListener('change', () => {
+    currentIndex = Number(size.value);
+    const center = mosaics[currentIndex].cubes / 2 - 1;
+    setSelection(center, center);
+    save();
+  });
+  board.addEventListener('click', event => {
+    const rect = board.getBoundingClientRect();
+    const count = mosaics[currentIndex].cubes;
+    setSelection(Math.floor((event.clientY - rect.top) * count / rect.height),
+      Math.floor((event.clientX - rect.left) * count / rect.width));
+    save();
+  });
+  for (const field of [rowField, columnField]) field.addEventListener('change', () => {
+    setSelection((rowField.valueAsNumber || selected[0] + 1) - 1,
+      (columnField.valueAsNumber || selected[1] + 1) - 1);
+    save();
+  });
+  showGrid.addEventListener('change', () => {
+    draw(board, mosaics[currentIndex], true);
+    save();
+  });
+  const storageKey = 'cube-snowflake/selection/v1';
+  function save() {
+    const state = {
+      modelContent: { cubesPerSide: sizes[currentIndex], row: selected[0] + 1, column: selected[1] + 1 },
+      privateContent: { showGrid: showGrid.checked },
+    };
+    try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch {}
+  }
+  function applyState(state) {
+    const restored = sizes.indexOf(state?.modelContent?.cubesPerSide);
+    if (restored >= 0) {
+      currentIndex = restored;
+      size.value = restored;
+    }
+    showGrid.checked = state?.privateContent?.showGrid !== false;
+    const center = mosaics[currentIndex].cubes / 2;
+    setSelection((state?.modelContent?.row || center) - 1, (state?.modelContent?.column || center) - 1);
+  }
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    previews.forEach((canvas, index) => draw(canvas, mosaics[index]));
+    paintInspection();
+  });
+  let storedState;
+  try { storedState = JSON.parse(localStorage.getItem(storageKey)); } catch {}
+  applyState(storedState);
+})();
+</script>
+  <noscript><p>请启用 JavaScript 查看拼装图。</p></noscript>
+</main>
+</body>
+</html>
